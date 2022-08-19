@@ -1,7 +1,7 @@
 # Copyright 1999-2020 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
-EAPI="5"
+EAPI=8
 
 inherit eutils autotools flag-o-matic
 
@@ -98,6 +98,7 @@ src_install() {
 	# Create cfengine working directory
 	dodir /var/cfengine/bin
 	fperms 700 /var/cfengine
+	fperms 700 /var/cfengine/ppkeys
 
 	# Copy cfagent into the cfengine tree otherwise cfexecd won't
 	# find it. Most hosts cache their copy of the cfengine
@@ -109,14 +110,14 @@ src_install() {
 		dosym ../../../usr/bin/cf-$bin var/cfengine/bin/cf-$bin || die
 	done
 
-	for dir in inputs modules outputs plugins ppkeys state; do
-		keepdir /var/cfengine/$dir
-	done
-
 	if use masterfiles; then
 		insinto /var/cfengine
 		doins -r "${WORKDIR}/masterfiles"
 	fi
+
+	for dir in inputs modules outputs plugins ppkeys state; do
+		keepdir /var/cfengine/$dir
+	done
 
 	dodir /etc/env.d
 	echo 'CONFIG_PROTECT=/var/cfengine/masterfiles' >"${ED}/etc/env.d/99${PN}" || die
