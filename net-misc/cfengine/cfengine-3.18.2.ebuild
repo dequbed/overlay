@@ -1,7 +1,7 @@
-# Copyright 1999-2020 Gentoo Authors
+# Copyright 1999-2022 Gentoo Authors
 # Distributed under the terms of the GNU General Public License v2
 
-EAPI=8
+EAPI=7
 
 inherit eutils autotools flag-o-matic
 
@@ -18,15 +18,16 @@ LICENSE="GPL-3"
 SLOT="3"
 KEYWORDS="~amd64 ~x86"
 
-IUSE="acl examples libvirt mysql masterfiles postgres +qdbm selinux tokyocabinet vim-syntax xml +yaml"
+IUSE="acl examples libvirt +lmdb mysql masterfiles pam postgres qdbm selinux systemd tokyocabinet vim-syntax xml +yaml"
 
 DEPEND="acl? ( virtual/acl )
+	libvirt? ( app-emulation/libvirt )
+	lmdb? ( dev-db/lmdb )
 	mysql? ( virtual/mysql )
 	postgres? ( dev-db/postgresql:= )
+	qdbm? ( dev-db/qdbm )
 	selinux? ( sys-libs/libselinux )
 	tokyocabinet? ( dev-db/tokyocabinet )
-	qdbm? ( dev-db/qdbm )
-	libvirt? ( app-emulation/libvirt )
 	xml? ( dev-libs/libxml2:2 )
 	yaml? ( dev-libs/libyaml ) \
 	dev-libs/openssl
@@ -34,14 +35,12 @@ DEPEND="acl? ( virtual/acl )
 RDEPEND="${DEPEND}"
 PDEPEND="vim-syntax? ( app-vim/cfengine-syntax )"
 
-REQUIRED_USE="^^ ( qdbm tokyocabinet )"
+REQUIRED_USE="^^ ( lmdb qdbm tokyocabinet )"
 
 S="${WORKDIR}/${MY_P}"
 
 src_prepare() {
 	default
-	#epatch "${FILESDIR}/${P}-ifconfig.patch"
-	#epatch "${FILESDIR}/${P}-sysmacros.patch"
 	eautoreconf
 }
 
@@ -60,12 +59,17 @@ src_configure() {
 		--docdir=/usr/share/doc/${PF} \
 		--with-workdir=/var/cfengine \
 		--with-pcre \
+		--with-openssl \
 		$(use_with acl libacl) \
-		$(use_with qdbm) \
-		$(use_with tokyocabinet) \
-		$(use_with postgres postgresql) \
-		$(use_with mysql mysql check) \
 		$(use_with libvirt) \
+		$(use_with lmdb) \
+		$(use_with mysql mysql check) \
+		$(use_with pam) \
+		$(use_with postgres postgresql) \
+		$(use_with qdbm) \
+		$(use_with systemd systemd-socket) \
+		$(use_with tokyocabinet) \
+		$(use_with xml libxml2) \
 		$(use_with yaml libyaml) \
 		$(use_enable selinux)
 
@@ -77,17 +81,15 @@ src_configure() {
 }
 
 src_install() {
-	newinitd "${FILESDIR}"/cf-serverd.rc6 cf-serverd || die
-	newinitd "${FILESDIR}"/cf-monitord.rc6 cf-monitord || die
-	newinitd "${FILESDIR}"/cf-execd.rc6 cf-execd || die
+	# The CFEngine build process generates systemd service files automatically
+	# so there is no equivalent to the below in that case.
+	if ! use systemd ; then
+		newinitd "${FILESDIR}"/cf-serverd.rc6 cf-serverd || die
+		newinitd "${FILESDIR}"/cf-monitord.rc6 cf-monitord || die
+		newinitd "${FILESDIR}"/cf-execd.rc6 cf-execd || die
+	fi
 
 	emake DESTDIR="${D}" install || die
-
-	# fix ifconfig path in provided promises
-	find "${D}"/usr/share -name "*.cf" | xargs sed -i "s,/sbin/ifconfig,$(which ifconfig),g"
-
-	# Evil workaround for now..
-	mv "${D}"/usr/share/doc/${PN}/ "${D}"/usr/share/doc/${PF}
 
 	dodoc AUTHORS
 
@@ -124,30 +126,21 @@ src_install() {
 }
 
 pkg_postinst() {
-	echo
-	elog "NOTE: BDB (BerkelyDB) support has been removed as of ${PN}-3.3.0"
-	echo
-	einfo "Init scripts for cf-serverd, cf-monitord, and cf-execd are provided."
-	einfo
-	einfo "If you don't want to use the init scripts, you can run cfengine using cron:"
-	einfo "0,30 * * * *    /usr/bin/cf-execd -O"
+	if use systemd ; then
+		einfo "Separate service files for each component of CFEngine are provided."
+		einfo
+		einfo "A meta service called 'cfengine3.service' is installed that will"
+		einfo "start all components as configured."
+	else
+		einfo "Init scripts for cf-serverd, cf-monitord, and cf-execd are provided."
+		einfo
+		einfo "If you don't want to use the init scripts, you can run cfengine using cron:"
+		einfo "0,30 * * * *    /usr/bin/cf-execd -O"
+	fi
 	echo
 
 	elog "If you run cfengine the very first time, you MUST generate the keys for cfengine by running:"
 	elog "emerge --config ${CATEGORY}/${PN}"
-
-	# Fix old cf-servd, remove it after some releases.
-	local found=0
-	for fname in $(find /etc/runlevels/ -type f -or -type l -name 'cf-servd'); do
-		found=1
-		rm $fname
-		ln -s /etc/init.d/cf-serverd $(echo $fname | sed 's:cf-servd:cf-serverd:')
-	done
-
-	if [ "${found}" -eq 1 ]; then
-		echo
-		elog "/etc/init.d/cf-servd has been renamed to /etc/init.d/cf-serverd"
-	fi
 }
 
 pkg_config() {
